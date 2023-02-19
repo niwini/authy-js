@@ -2,6 +2,7 @@ import _ from "lodash";
 
 import * as nodeSecp from "../secp";
 
+import BufferLike from "./buffer";
 import * as secp from "./secp";
 
 //#####################################################
@@ -45,11 +46,12 @@ describe("[web] secp test", () => {
     const sub2 = signatureBuff.subarray(3);
 
     const sub1Shuffled = Buffer.from(_.shuffle(sub1));
-    const tempered = Buffer.concat([sub1Shuffled, sub2]);
+    const tempered = BufferLike.from(Buffer.concat([sub1Shuffled, sub2]));
 
+    const isValidExpected = signature.toHex() === tempered.toHex();
     const isValid = await secp.signVerify(tempered, data, keys.pubKey);
 
-    expect(isValid).toBe(false);
+    expect(isValid).toBe(isValidExpected);
   });
 
   it("should be able to verify data in nodejs", async () => {

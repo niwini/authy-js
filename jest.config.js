@@ -24,6 +24,9 @@ const config = {
   setupFilesAfterEnv: [
     "./jest.setup.ts",
   ],
+  testPathIgnorePatterns: [
+    "<rootDir>/dist",
+  ],
   testRegex: "(?<!\\.integ)\\.(test|spec)\\.tsx?$",
   transform: {
     "^.+\\.tsx?$": "ts-jest",

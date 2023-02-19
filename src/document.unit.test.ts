@@ -1,5 +1,3 @@
-import { ObjectId } from "bson";
-
 import * as document from "./document";
 import * as secp from "./secp";
 
@@ -7,7 +5,6 @@ import * as secp from "./secp";
 // Constants
 //#####################################################
 const keys = secp.genKeyPair();
-const ownerId = new ObjectId().toHexString();
 
 let doc: document.IDocument;
 
@@ -17,14 +14,11 @@ let doc: document.IDocument;
 describe("document test", () => {
   beforeEach(() => {
     doc = document.build({
-      content: {
-        data: "test@email.com",
-        owner_id: ownerId,
-        subtype: "email",
-        title: "My Email",
-        type: "attribute",
-      },
-      pub_key: keys.pubKey.toHex(),
+      data: "test@email.com",
+      owner_pub_key: keys.pubKey.toHex(),
+      subtype: "email",
+      title: "My Email",
+      type: "attribute",
     });
   });
 

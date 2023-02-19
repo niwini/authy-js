@@ -14,7 +14,7 @@ import * as secp from "./secp";
 export interface IDocumentContent {
   data?: any;
   subtype: string;
-  owner_id: string;
+  owner_pub_key: string;
   schema_version?: string;
   title?: string;
   type: string;
@@ -35,7 +35,6 @@ export interface IDocument extends IDocumentContent {
   created_at: number;
   id: string;
   meta?: IDocumentMeta;
-  owner_id: string;
   search_hash: string;
   signers: IDocumentSigner[];
 }
@@ -47,30 +46,23 @@ export interface IDocument extends IDocumentContent {
  * This function is going to build a new
  * document with provided contents.
  *
- * @param args -
- * @param args.content -
- * @param args.pub_key -
+ * @param content -
  */
 export function build(
-  args: {
-    content: IDocumentContent;
-    pub_key: string;
-  },
+  content: IDocumentContent,
 ): IDocument {
-  const {
-    content,
-    pub_key: pubKey,
-  } = args;
-
   /**
    * @todo - Verify the content schema.
    */
 
   return {
-    cipher: ecies.encrypt(content.data, pubKey).toHex(),
+    cipher: ecies.encrypt(
+      content.data,
+      content.owner_pub_key,
+    ).toHex(),
     created_at: dayjs().unix(),
     id: new ObjectId().toHexString(),
-    owner_id: content.owner_id,
+    owner_pub_key: content.owner_pub_key,
     schema_version: "1.0",
     search_hash: hash.sha256(content.data).toHex(),
     signers: [],
