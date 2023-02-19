@@ -1,8 +1,11 @@
 /* eslint-disable import/prefer-default-export */
 import { ObjectId } from "bson";
+import dayjs from "dayjs";
+import _ from "lodash";
 
 import { IBufferLikeInput } from "./buffer";
 import * as ecies from "./ecies";
+import * as hash from "./hash";
 import * as secp from "./secp";
 
 //#####################################################
@@ -12,6 +15,7 @@ export interface IDocumentContent {
   data?: any;
   subtype: string;
   owner_id: string;
+  schema_version?: string;
   title?: string;
   type: string;
 }
@@ -20,11 +24,10 @@ export interface IDocumentSigner {
   data?: any;
   pub_key: string;
   signature: string;
-  type: "owner" | "user" | "certifier";
 }
 
 export interface IDocumentMeta {
-  signers?: IDocumentSigner[];
+  certifiers?: IDocumentSigner[];
 }
 
 export interface IDocument extends IDocumentContent {
@@ -34,26 +37,43 @@ export interface IDocument extends IDocumentContent {
   meta?: IDocumentMeta;
   owner_id: string;
   search_hash: string;
+  signers: IDocumentSigner[];
 }
 
 //#####################################################
 // Functions
 //#####################################################
 /**
- * This function is going to generate a new
+ * This function is going to build a new
  * document with provided contents.
  *
- * @param content -
- * @param pubKey -
+ * @param args -
+ * @param args.content -
+ * @param args.pub_key -
  */
-export function generate(
-  content: IDocumentContent,
-  pubKey: string,
-) {
+export function build(
+  args: {
+    content: IDocumentContent;
+    pub_key: string;
+  },
+): IDocument {
+  const {
+    content,
+    pub_key: pubKey,
+  } = args;
+
+  /**
+   * @todo - Verify the content schema.
+   */
+
   return {
     cipher: ecies.encrypt(content.data, pubKey).toHex(),
+    created_at: dayjs().unix(),
     id: new ObjectId().toHexString(),
     owner_id: content.owner_id,
+    schema_version: "1.0",
+    search_hash: hash.sha256(content.data).toHex(),
+    signers: [],
     subtype: content.subtype,
     title: content.title,
     type: content.type,
@@ -61,39 +81,148 @@ export function generate(
 }
 
 /**
+ * Function validates a document.
+ *
+ * @param document -
+ */
+export async function validate(
+  document: IDocument,
+) {
+  if (!ObjectId.isValid(document.id)) {
+    return false;
+  }
+
+  /**
+   * Verify signers and certifiers.
+   */
+  const signResults = await Promise.all([
+    ...(document.signers ?? []).map(
+      (signer) => secp.signVerify(
+        signer.signature,
+        [
+          _.omit(document, ["meta", "signers"]),
+          signer.data,
+        ].filter(Boolean),
+        signer.pub_key,
+      ),
+    ),
+    ...(document.meta?.certifiers ?? []).map(
+      (certifier) => secp.signVerify(
+        certifier.signature,
+        [
+          _.omit(document, ["meta"]),
+          certifier.data,
+        ].filter(Boolean),
+        certifier.pub_key,
+      ),
+    ),
+  ].filter(Boolean));
+
+  for (const isResultValid of signResults) {
+    if (!isResultValid) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * This function is going to sign a document.
  *
- * @param args -
- * @param args.document -
- * @param args.pvtKey -
- * @param args.type -
+ * @param document -
+ * @param pvtKey -
+ * @param opts -
+ * @param opts.data -
  */
 export async function sign(
-  args: {
-    document: IDocument;
-    pvtKey: IBufferLikeInput;
-    type?: IDocumentSigner["type"];
-  },
+  document: IDocument,
+  pvtKey: IBufferLikeInput,
+  opts: {
+    data?: any;
+  } = {},
 ): Promise<IDocument> {
   const { pubKey } = secp.genKeyPair({
-    pvtKey: args.pvtKey,
+    pvtKey,
   });
 
-  const type = args.type ?? "user";
-
   const signer = {
+    data: opts.data,
     pub_key: pubKey.toHex(),
-    signature: (await secp.signData(args.document, args.pvtKey)).toHex(),
-    type,
+    signature: (
+      await secp.signData(
+        [
+          _.omit(document, ["meta", "signers"]),
+          opts.data,
+        ].filter(Boolean),
+        pvtKey,
+      )
+    ).toHex(),
   };
 
   return {
-    ...args.document,
+    ...document,
+    signers: [
+      ...document.signers ?? [],
+      signer,
+    ],
+  };
+}
+
+/**
+ * This function is going to sign a document.
+ *
+ * @param document -
+ * @param pvtKey -
+ * @param opts -
+ * @param opts.data -
+ */
+export async function certify(
+  document: IDocument,
+  pvtKey: IBufferLikeInput,
+  opts: {
+    data?: any;
+  } = {},
+): Promise<IDocument> {
+  const { pubKey } = secp.genKeyPair({
+    pvtKey,
+  });
+
+  /**
+   * Validate the document first.
+   */
+  const isValid = await validate(document);
+
+  /**
+   * If all signatures are valid we consider the
+   * document is valid and therefore we can certify
+   * the document.
+   */
+  if (!isValid) {
+    throw new Error("document is invalid");
+  }
+
+  const certifier = {
+    data: opts.data,
+    pub_key: pubKey.toHex(),
+    signature: (
+      await secp.signData(
+        [
+          _.omit(document, ["meta"]),
+          opts.data,
+        ].filter(Boolean),
+        pvtKey,
+      )
+    ).toHex(),
+  };
+
+  return {
+    ...document,
     meta: {
-      ...args.document.meta ?? {},
-      signers: [
-        ...args.document.meta?.signers ?? [],
-        signer,
+      ...document.meta ?? {},
+      certifiers: [
+        ...document.meta?.certifiers ?? [],
+        certifier,
       ],
     },
   };
