@@ -2,7 +2,7 @@ import { IBufferLikeInput } from "./buffer";
 export interface IDocumentContent {
     data?: any;
     subtype: string;
-    owner_id: string;
+    owner_pub_key: string;
     schema_version?: string;
     title?: string;
     type: string;
@@ -20,7 +20,6 @@ export interface IDocument extends IDocumentContent {
     created_at: number;
     id: string;
     meta?: IDocumentMeta;
-    owner_id: string;
     search_hash: string;
     signers: IDocumentSigner[];
 }
@@ -28,14 +27,9 @@ export interface IDocument extends IDocumentContent {
  * This function is going to build a new
  * document with provided contents.
  *
- * @param args -
- * @param args.content -
- * @param args.pub_key -
+ * @param content -
  */
-export declare function build(args: {
-    content: IDocumentContent;
-    pub_key: string;
-}): IDocument;
+export declare function build(content: IDocumentContent): IDocument;
 /**
  * Function validates a document.
  *
