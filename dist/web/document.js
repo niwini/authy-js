@@ -22,61 +22,149 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sign = exports.generate = void 0;
+exports.certify = exports.sign = exports.validate = exports.build = void 0;
 /* eslint-disable import/prefer-default-export */
 const bson_1 = require("bson");
+const dayjs_1 = __importDefault(require("dayjs"));
+const lodash_1 = __importDefault(require("lodash"));
 const ecies = __importStar(require("./ecies"));
+const hash = __importStar(require("./hash"));
 const secp = __importStar(require("./secp"));
 //#####################################################
 // Functions
 //#####################################################
 /**
- * This function is going to generate a new
+ * This function is going to build a new
  * document with provided contents.
  *
- * @param content -
- * @param pubKey -
+ * @param args -
+ * @param args.content -
+ * @param args.pub_key -
  */
-function generate(content, pubKey) {
+function build(args) {
+    const { content, pub_key: pubKey, } = args;
+    /**
+     * @todo - Verify the content schema.
+     */
     return {
         cipher: ecies.encrypt(content.data, pubKey).toHex(),
+        created_at: (0, dayjs_1.default)().unix(),
         id: new bson_1.ObjectId().toHexString(),
         owner_id: content.owner_id,
+        schema_version: "1.0",
+        search_hash: hash.sha256(content.data).toHex(),
+        signers: [],
         subtype: content.subtype,
         title: content.title,
         type: content.type,
     };
 }
-exports.generate = generate;
+exports.build = build;
+/**
+ * Function validates a document.
+ *
+ * @param document -
+ */
+async function validate(document) {
+    if (!bson_1.ObjectId.isValid(document.id)) {
+        return false;
+    }
+    /**
+     * Verify signers and certifiers.
+     */
+    const signResults = await Promise.all([
+        ...(document.signers ?? []).map((signer) => secp.signVerify(signer.signature, [
+            lodash_1.default.omit(document, ["meta", "signers"]),
+            signer.data,
+        ].filter(Boolean), signer.pub_key)),
+        ...(document.meta?.certifiers ?? []).map((certifier) => secp.signVerify(certifier.signature, [
+            lodash_1.default.omit(document, ["meta"]),
+            certifier.data,
+        ].filter(Boolean), certifier.pub_key)),
+    ].filter(Boolean));
+    for (const isResultValid of signResults) {
+        if (!isResultValid) {
+            return false;
+        }
+    }
+    return true;
+}
+exports.validate = validate;
 /**
  * This function is going to sign a document.
  *
- * @param args -
- * @param args.document -
- * @param args.pvtKey -
- * @param args.type -
+ * @param document -
+ * @param pvtKey -
+ * @param opts -
+ * @param opts.data -
  */
-async function sign(args) {
+async function sign(document, pvtKey, opts = {}) {
     const { pubKey } = secp.genKeyPair({
-        pvtKey: args.pvtKey,
+        pvtKey,
     });
-    const type = args.type ?? "user";
     const signer = {
+        data: opts.data,
         pub_key: pubKey.toHex(),
-        signature: (await secp.signData(args.document, args.pvtKey)).toHex(),
-        type,
+        signature: (await secp.signData([
+            lodash_1.default.omit(document, ["meta", "signers"]),
+            opts.data,
+        ].filter(Boolean), pvtKey)).toHex(),
     };
     return {
-        ...args.document,
+        ...document,
+        signers: [
+            ...document.signers ?? [],
+            signer,
+        ],
+    };
+}
+exports.sign = sign;
+/**
+ * This function is going to sign a document.
+ *
+ * @param document -
+ * @param pvtKey -
+ * @param opts -
+ * @param opts.data -
+ */
+async function certify(document, pvtKey, opts = {}) {
+    const { pubKey } = secp.genKeyPair({
+        pvtKey,
+    });
+    /**
+     * Validate the document first.
+     */
+    const isValid = await validate(document);
+    /**
+     * If all signatures are valid we consider the
+     * document is valid and therefore we can certify
+     * the document.
+     */
+    if (!isValid) {
+        throw new Error("document is invalid");
+    }
+    const certifier = {
+        data: opts.data,
+        pub_key: pubKey.toHex(),
+        signature: (await secp.signData([
+            lodash_1.default.omit(document, ["meta"]),
+            opts.data,
+        ].filter(Boolean), pvtKey)).toHex(),
+    };
+    return {
+        ...document,
         meta: {
-            ...args.document.meta ?? {},
-            signers: [
-                ...args.document.meta?.signers ?? [],
-                signer,
+            ...document.meta ?? {},
+            certifiers: [
+                ...document.meta?.certifiers ?? [],
+                certifier,
             ],
         },
     };
 }
-exports.sign = sign;
+exports.certify = certify;
 //# sourceMappingURL=document.js.map
